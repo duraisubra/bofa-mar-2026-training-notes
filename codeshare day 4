@@ -985,7 +985,18 @@ jobs:
           else
             echo "::notice::Coverage is ${COVERAGE}% - target met!"
           fi
-          
+
+#crontab
+crontab -e
+
+# Add this line — starts 2 fresh runners every 5 minutes
+*/5 * * * * cd /root/github-docker-runner/docker-runner && ./manage.sh cleanup && ./manage.sh start 2 >> /tmp/runner-cron.log 2>&1
+
+ sudo update-alternatives --config editor
+ update-alternatives --config editor
+ /tmp/crontab.pCGmcg/crontab
+
+
 Github migrate
 ----
 https://docs.github.com/en/actions/tutorials/migrate-to-github-actions/automated-migrations/jenkins-migration
