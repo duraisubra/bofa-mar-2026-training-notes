@@ -2288,9 +2288,355 @@ git branch -M main
 
 git remote add origin https://github.com/duraisubra-training-CBWT/java-app-shared-workflows-CBWT.git
 
+git push -u origin main
 
-C:\Users\Admin\repos\javaapp-main>
+updated secret scan yaml
+---
+name: Reusable Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      fetch-depth:
+        description: 'Git fetch depth for gitleaks'
+        required: false
+        type: number
+        default: 1
+      trivy-severity:
+        description: 'Trivy severity levels'
+        required: false
+        type: string
+        default: 'CRITICAL,HIGH'
+      codeql-language:
+        description: 'CodeQL language'
+        required: false
+        type: string
+        default: 'java-kotlin'
+      java-version:
+        description: 'Java version'
+        required: false
+        type: string
+        default: '17'
+      gitleaks-config:
+        description: 'Gitleaks config file path'
+        required: false
+        type: string
+        default: '.gitleaks.toml'
+      trivyignore-file:
+        description: 'Trivy ignore file path'
+        required: false
+        type: string
+        default: '.trivyignore'
+    outputs:
+      gitleaks-result:
+        description: 'Gitleaks scan result'
+        value: ${{ jobs.gitleaks.result }}
+      sca-result:
+        description: 'SCA scan result'
+        value: ${{ jobs.sca.result }}
+      codeql-result:
+        description: 'CodeQL scan result'
+        value: ${{ jobs.codeql.result }}
+      gate-result:
+        description: 'Overall security gate result'
+        value: ${{ jobs.security-gate.result }}
+
+jobs:
+
+  # ---- Job 1: Secret Scan ----
+  gitleaks:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ inputs.fetch-depth }}
+
+      - name: Install Gitleaks
+        run: |
+          GITLEAKS_VERSION=8.24.3
+          wget -qO- https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz | tar xz
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Run Gitleaks
+        id: gitleaks
+        run: |
+          if [ -f "${{ inputs.gitleaks-config }}" ]; then
+            CONFIG_FLAG="--config ${{ inputs.gitleaks-config }}"
+          else
+            CONFIG_FLAG=""
+          fi
+
+          gitleaks detect \
+            --source . \
+            $CONFIG_FLAG \
+            --report-format sarif \
+            --report-path results.sarif \
+            --redact \
+            -v && echo "leaks_found=false" >> "$GITHUB_OUTPUT" \
+               || echo "leaks_found=true" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+
+      - name: Upload Gitleaks SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: gitleaks
+        continue-on-error: true
+
+      - name: Upload Gitleaks Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: results.sarif
+          retention-days: 30
+
+      - name: Quality Gate - Secrets
+        if: steps.gitleaks.outputs.leaks_found == 'true'
+        run: |
+          echo "=========================================="
+          echo "  QUALITY GATE FAILED - SECRETS FOUND"
+          echo "=========================================="
+          exit 1
+
+  # ---- Job 2: SCA ----
+  sca:
+    name: SCA - Trivy Dependency Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy SCA Scan
+        id: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: ${{ inputs.trivy-severity }}
+          exit-code: '1'
+          trivyignores: ${{ inputs.trivyignore-file }}
+        continue-on-error: true
+
+      - name: Run Trivy SARIF Report
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-sca-results.sarif'
+          severity: ${{ inputs.trivy-severity }}
+          trivyignores: ${{ inputs.trivyignore-file }}
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-sca-results.sarif
+          category: trivy-sca
+        continue-on-error: true
+
+      - name: Upload Trivy Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sca-report
+          path: trivy-sca-results.sarif
+          retention-days: 30
+
+      - name: Quality Gate - SCA
+        if: steps.trivy.outcome == 'failure'
+        run: |
+          echo "=========================================="
+          echo "  QUALITY GATE FAILED - DEPENDENCY CVEs"
+          echo "=========================================="
+          exit 1
+
+  # ---- Job 3: SAST ----
+  codeql:
+    name: SAST - CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ inputs.java-version }}
+          cache: 'maven'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ inputs.codeql-language }}
+          queries: security-and-quality
+
+      - name: Build for CodeQL
+        run: mvn clean package -DskipTests -B
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-java
+          output: codeql-results
+
+      - name: Count CodeQL Alerts
+        id: codeql-check
+        if: always()
+        run: |
+          ALERT_COUNT=$(jq '[.runs[].results[]] | length' codeql-results/*.sarif)
+          echo "alert_count=$ALERT_COUNT" >> "$GITHUB_OUTPUT"
+          echo "CodeQL found $ALERT_COUNT alert(s)"
+
+      - name: Quality Gate - SAST
+        if: steps.codeql-check.outputs.alert_count != '0'
+        run: |
+          echo "=========================================="
+          echo "  QUALITY GATE FAILED - CODE ISSUES FOUND"
+          echo "  CodeQL found ${{ steps.codeql-check.outputs.alert_count }} alert(s)"
+          echo "=========================================="
+          exit 1
+
+  # ---- Job 4: Gate ----
+  security-gate:
+    name: Security Quality Gate
+    runs-on: ubuntu-latest
+    needs: [gitleaks, sca, codeql]
+    if: always()
+    steps:
+      - name: Evaluate scan results
+        run: |
+          echo "=========================================="
+          echo "  SECURITY SCAN SUMMARY"
+          echo "=========================================="
+          echo "  Gitleaks (Secrets) : ${{ needs.gitleaks.result }}"
+          echo "  Trivy (SCA)       : ${{ needs.sca.result }}"
+          echo "  CodeQL (SAST)     : ${{ needs.codeql.result }}"
+          echo "=========================================="
+
+          if [[ "${{ needs.gitleaks.result }}" != "success" || \
+                "${{ needs.sca.result }}" != "success" || \
+                "${{ needs.codeql.result }}" != "success" ]]; then
+            echo ""
+            echo "  PIPELINE BLOCKED - Fix issues first"
+            echo "=========================================="
+            exit 1
+          fi
+
+          echo ""
+          echo "  ALL SCANS PASSED"
+          echo "=========================================="
 
 
+Create workflow in the dev org java app repo
+---
+.github/workflows/pipeline.yml
 
 
+name: Full Pipeline (Cross-Org Shared Workflows)
+
+on:
+  workflow_dispatch:
+
+
+jobs:
+
+  # Stage 1: Security Scans (from duraisubra-training)
+  security:
+    name: Security Scans
+    uses: duraisubra-training/shared-workflows/.github/workflows/security-scan.yml@main
+    with:
+      fetch-depth: 1
+      trivy-severity: 'CRITICAL,HIGH'
+      codeql-language: 'java-kotlin'
+      java-version: '17'
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+  # Stage 2: Build & Test (from duraisubra-training)
+  build:
+    name: Build & Test
+    needs: security
+    uses: duraisubra-training/shared-workflows/.github/workflows/java-build.yml@main
+    with:
+      java-version: '17'
+      maven-goals: 'clean package -B'
+    permissions:
+      contents: read
+      checks: write
+      actions: read
+
+  # Stage 3: Docker Build, Scan & Push (from duraisubra-training)
+  docker:
+    name: Docker Build & Push
+    needs: build
+    uses: duraisubra-training/shared-workflows/.github/workflows/docker-build.yml@main
+    with:
+      image-name: ${{ github.repository }}
+      trivy-severity: 'CRITICAL,HIGH'
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      actions: read
+
+  # Stage 4: Summary
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [security, build, docker]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Results
+        run: |
+          echo "=========================================="
+          echo "  CROSS-ORG PIPELINE SUMMARY"
+          echo "=========================================="
+          echo "  Shared workflows : duraisubra-training"
+          echo "  Running in       : duraisubra-training-CBWT/java-app-shared-workflows-CBWT"
+          echo "=========================================="
+          echo ""
+          echo "  SECURITY SCANS"
+          echo "  ─────────────────────────────────"
+          echo "  Security Gate  : ${{ needs.security.result }}"
+          echo ""
+          echo "  BUILD & DELIVERY"
+          echo "  ─────────────────────────────────"
+          echo "  Build & Test   : ${{ needs.build.result }}"
+          echo "  Docker & Push  : ${{ needs.docker.result }}"
+          echo "=========================================="
+
+          if [[ "${{ needs.docker.result }}" == "success" ]]; then
+            echo ""
+            echo "  ALL STAGES PASSED"
+            echo "  Image: ghcr.io/${{ github.repository }}:latest"
+            echo "=========================================="
+          else
+            echo ""
+            echo "  PIPELINE FAILED"
+            echo "=========================================="
+            exit 1
+          fi
