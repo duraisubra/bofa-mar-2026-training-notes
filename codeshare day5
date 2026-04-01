@@ -2640,3 +2640,54 @@ jobs:
             echo "=========================================="
             exit 1
           fi
+
+
+delete login page file with secret
+---
+src/test/java/com/example/selenium
+
+enable code security
+---
+repo -- security and quality -- code scanning alert -- setting 
+
+run the work flow
+
+Fork the repo
+---
+https://github.com/sathishbabudevops/pr-discord-bot
+
+Create a Discord server
+
+Here's how to get the webhook URL:
+
+Step by step:
+
+Click the ⚙️ gear icon next to the #general channel 
+In the channel settings, click Integrations in the left sidebar
+Click Webhooks
+Click New Webhook
+
+Click Copy Webhook URL
+Then go to your repo → Settings → Secrets → Actions → New secret
+
+Name: DISCORD_WEBHOOK_URL
+Value: paste the webhook URL you copied
+
+value: https://discord.com/api/webhooks/1488841777652699177/u8IIIiMHzk_6MidcddBJAVG8VXmsDBxK5XHK9OYULCTrJdC-csvChOjkIzsu6hA0sJ53
+
+create a new branch in the forked repo
+---
+branch name dev
+
+in the new branch create a file and commit 
+
+compare and pull request
+
+create pull request
+
+Please complete the post assesment and feedback
+-----
+
+Post Assessment Link: https://forms.cloud.microsoft/r/spPCbgALgi
+
+Feedback Link: https://forms.cloud.microsoft/r/ppi7T9FL00
