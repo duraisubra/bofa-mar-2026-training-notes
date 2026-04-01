@@ -3100,3 +3100,4 @@ merger should be allowed
 
 remove required check yaml
 ---
+try to merge it it will be blocked
