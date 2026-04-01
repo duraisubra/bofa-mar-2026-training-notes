@@ -2280,8 +2280,8 @@ open command promt and navigate to c:\user\admin\repo\javaapp
 ---
 git init
 git add .
-git config --global user.email "sathishbabudevops@gmail.com"
-git config --global user.name "sathishbabudevops"
+git config --global user.email "duraisubra@yahoo.co.uk"
+git config --global user.name "duraisubra"
 git commit -m "first commit"
 
 git branch -M main
